@@ -74,7 +74,7 @@ class JunkStorage:
             f.write("Назва|Кількість|Ціна\n")  # шапка
             for it in items:
                 f.write(it.line() + "\n")
-        print(f" Файл збережено: {filename}")
+        print(f"✅ Файл збережено: {filename}")
 
     @staticmethod
     def parse(filename: str = FILENAME) -> list[JunkItem]:
@@ -162,7 +162,7 @@ def menu():
             show(items)
 
         elif ch == "6":
-            print(" Готово.")
+            print("👋 Готово.")
             break
         else:
             print("Невірний вибір.\n")
