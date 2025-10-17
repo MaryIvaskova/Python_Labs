@@ -1,123 +1,163 @@
 import os
 
-SEP = '|'  # єдиний роздільник полів
+# --------- конфіг ---------
+FORMAT_MODE = "portal"  # "task" або "portal"
+SEP_TASK, DEC_TASK = "|", ","   # умова
+SEP_PORT, DEC_PORT = ";", "."   # для порталу
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_FILE = os.path.join(BASE_DIR, "мусорка.csv")
 
-def dec_to_comma(x: float) -> str:
-    return f"{float(x):.2f}".replace('.', ',')
 
-def comma_to_dec(s: str) -> float:
-    # "2,50" -> 2.5, також прибираємо пробіли
-    return float((s or '').replace(' ', '').replace(',', '.'))
+# --------- утиліти ---------
+def detect_format(line: str):
+    """Визначає (sep, dec) по рядку."""
+    if SEP_TASK in line:
+        return SEP_TASK, DEC_TASK
+    if SEP_PORT in line:
+        return SEP_PORT, DEC_PORT
+    return SEP_TASK, DEC_TASK  # дефолт — умова задачі
+
+def to_dec(x: float, dec: str) -> str:
+    """Форматує 2 знаки і ставить потрібний десятковий роздільник."""
+    s = f"{float(x):.2f}"
+    return s.replace(".", dec)
+
+def from_dec(s: str, dec: str) -> float:
+    """Читає число з потрібним десятковим роздільником."""
+    s = (s or "").replace(" ", "")
+    if dec == ",":
+        s = s.replace(",", ".")
+    return float(s)
 
 def norm_name(name: str) -> str:
-    # нижній регістр + єдиний пробіл між словами
-    return ' '.join(name.strip().lower().split())
+    return " ".join((name or "").strip().lower().split())
 
 def price_key(v: float) -> str:
-    # ключ ціни у 2 знаки (щоб стабільно порівнювати)
     return f"{float(v):.2f}"
 
+
+# --------- модель ---------
 class JunkItem:
     def __init__(self, name: str, quantity: int, value: float):
-        name = (name or '').strip().replace(SEP, '/')
-        self.name = name
+        # захист від вбудованих роздільників у назві
+        safe = (name or "").strip().replace("|", "/").replace(";", "/")
+        self.name = safe
         self.quantity = int(quantity)
         self.value = float(value)
 
-    def to_line(self) -> str:
-        # Назва|Кількість|Ціна(з комою)
-        return f"{self.name}{SEP}{self.quantity}{SEP}{dec_to_comma(self.value)}"
+    def to_line(self, sep="|", dec=",") -> str:
+        # Назва|К-сть|Ціна(десяткова: кома/крапка)
+        return sep.join([self.name, str(self.quantity), to_dec(self.value, dec)])
 
     @staticmethod
     def from_line(line: str):
-        # розбір "Назва|Кількість|Ціна_з_комою"
-        if not line or SEP not in line:
-            return None
-        parts = [p.strip() for p in line.strip().split(SEP)]
+        sep, dec = detect_format(line)
+        parts = [p.strip() for p in line.strip().split(sep)]
         if len(parts) != 3:
             return None
         name, q, v = parts
         try:
             q = int(q)
-            v = comma_to_dec(v)
+            v = from_dec(v, dec)
             return JunkItem(name, q, v)
         except:
             return None
 
+
+# --------- злиття дублікатів ---------
 def item_key(it: JunkItem) -> tuple[str, str]:
-    # дубль = однакове (нормалізована назва, ціна у 2 знаки)
+    # дубль = однакові (нормалізована назва, ціна з 2 знаками)
     return (norm_name(it.name), price_key(it.value))
 
-class JunkStorage:
-    @staticmethod
-    def serialize(items: list[JunkItem], filename: str = DEFAULT_FILE) -> None:
-        # перед записом зливаємо дублікати
-        items = JunkStorage._merge_all(items)
-        with open(filename, 'w', encoding='utf-8', newline='') as f:
-            for it in items:
-                f.write(it.to_line() + '\n')
-        print(f"Файл створено/оновлено: {filename}")
+def merge_item(items: list[JunkItem], new_item: JunkItem) -> None:
+    k = item_key(new_item)
+    for it in items:
+        if item_key(it) == k:
+            it.quantity += new_item.quantity
+            return
+    items.append(new_item)
 
-    @staticmethod
-    def parse(filename: str = DEFAULT_FILE) -> list[JunkItem]:
-        items: list[JunkItem] = []
-        bad = 0
-        try:
-            with open(filename, 'r', encoding='utf-8') as f:
-                for i, line in enumerate(f, 1):
-                    it = JunkItem.from_line(line)
-                    if it:
-                        JunkStorage._merge_one(items, it)
-                    else:
-                        bad += 1
-                        print(f"Рядок {i} пропущено (зіпсовані дані)")
-            if bad:
-                print(f"Помилкових рядків: {bad}")
-            print(f"Прочитано валідних записів: {len(items)}")
-        except FileNotFoundError:
-            print(f"Файл '{filename}' не знайдено — буде створено при збереженні.")
-        return items
+def merge_all(items: list[JunkItem]) -> list[JunkItem]:
+    acc: list[JunkItem] = []
+    for it in items:
+        merge_item(acc, it)
+    return acc
 
-    @staticmethod
-    def _merge_one(items: list[JunkItem], new_item: JunkItem) -> None:
-        k = item_key(new_item)
+
+# --------- I/O ---------
+def save_items(items: list[JunkItem], filename: str = DEFAULT_FILE) -> None:
+    """Запис у один файл 'мусорка.csv' у вибраному форматі."""
+    items = merge_all(items)
+    if FORMAT_MODE == "portal":
+        sep, dec = SEP_PORT, DEC_PORT
+    else:
+        sep, dec = SEP_TASK, DEC_TASK
+
+    with open(filename, "w", encoding="utf-8", newline="") as f:
+        # для порталу можна дати шапку — портали люблять
+        if sep == SEP_PORT:
+            f.write(f"name{sep}quantity{sep}value\n")
         for it in items:
-            if item_key(it) == k:
-                it.quantity += new_item.quantity
-                return
-        items.append(new_item)
+            f.write(it.to_line(sep=sep, dec=dec) + "\n")
 
-    @staticmethod
-    def _merge_all(items: list[JunkItem]) -> list[JunkItem]:
-        acc: list[JunkItem] = []
-        for it in items:
-            JunkStorage._merge_one(acc, it)
-        return acc
+    print(f"Файл створено/оновлено: {filename}  (формат: {FORMAT_MODE})")
 
-# ——— вивід у консоль (для демонстрації) ———
+def load_items(filename: str = DEFAULT_FILE) -> list[JunkItem]:
+    """Читає як 'task', так і 'portal' формат, шапку порталу ігнорує."""
+    items: list[JunkItem] = []
+    bad = 0
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            first = True
+            for i, line in enumerate(f, 1):
+                # пропустити шапку у 'portal'
+                if first and (SEP_PORT in line) and line.lower().startswith(f"name{SEP_PORT}"):
+                    first = False
+                    continue
+                first = False
+
+                it = JunkItem.from_line(line)
+                if it:
+                    merge_item(items, it)
+                else:
+                    bad += 1
+                    print(f"Рядок {i} пропущено (зіпсовані дані)")
+        if bad:
+            print(f"Помилкових рядків: {bad}")
+        print(f"Прочитано валідних записів: {len(items)}")
+    except FileNotFoundError:
+        print(f"Файл '{filename}' не знайдено — буде створено при збереженні.")
+    return items
+
+
+# --------- вивід таблиці ---------
 def show(items: list[JunkItem]) -> None:
     if not items:
-        print("(порожньо)\n"); return
+        print("(порожньо)\n")
+        return
     print("\nНазва                 | К-сть |  Ціна  |  Сума ")
     print("------------------------------------------------")
     total = 0.0
     for it in items:
         s = it.quantity * it.value
         total += s
-        print(f"{it.name:<21} | {it.quantity:>5} | {dec_to_comma(it.value):>6} | {dec_to_comma(s):>6}")
+        # красивий вивід: десятковий роздільник під формат меню («кома» зручно візуально)
+        price_view = to_dec(it.value, ",")
+        sum_view = to_dec(s, ",")
+        print(f"{it.name:<21} | {it.quantity:>5} | {price_view:>6} | {sum_view:>6}")
     print("------------------------------------------------")
-    print(f"Разом: {dec_to_comma(total)}\n")
+    print(f"Разом: {to_dec(total, ',')}\n")
 
-# ——— просте меню ———
+
+# --------- меню ---------
 def menu():
     items: list[JunkItem] = []
     while True:
         print("Меню:")
         print("1. Додати предмет")
         print("2. Показати предмети")
-        print("3. Зберегти у файл (|, кома у дробах)")
+        print("3. Зберегти у файл (мусорка.csv)")
         print("4. Відкрити з файлу (замінює список)")
         print("5. Демо (3 предмети, дублікати сумуються)")
         print("6. Вийти")
@@ -128,8 +168,12 @@ def menu():
             q = input("Кількість (int): ").strip()
             v = input("Ціна (крапка або кома): ").strip()
             try:
-                it = JunkItem(name, int(q), comma_to_dec(v))
-                JunkStorage._merge_one(items, it)
+                # приймаємо і кому, і крапку — перетворимо за портальним форматом
+                # (неважливо, усе збережеться згідно FORMAT_MODE)
+                dec = DEC_PORT if FORMAT_MODE == "portal" else DEC_TASK
+                val = from_dec(v, dec) if ("," in v or "." in v) else float(v)
+                it = JunkItem(name, int(q), float(val))
+                merge_item(items, it)
                 print("Додано/оновлено.\n")
             except:
                 print("Помилка вводу.\n")
@@ -138,16 +182,16 @@ def menu():
             show(items)
 
         elif ch == "3":
-            JunkStorage.serialize(items, DEFAULT_FILE)
+            save_items(items, DEFAULT_FILE)
 
         elif ch == "4":
-            items = JunkStorage.parse(DEFAULT_FILE)
+            items = load_items(DEFAULT_FILE)
             show(items)
 
         elif ch == "5":
-            JunkStorage._merge_one(items, JunkItem("Бляшанка",    5, 2.50))
-            JunkStorage._merge_one(items, JunkItem("Стара плата", 3, 7.80))
-            JunkStorage._merge_one(items, JunkItem("Купка дротів",10, 1.20))
+            merge_item(items, JunkItem("Бляшанка",    5, 2.50))
+            merge_item(items, JunkItem("Стара плата", 3, 7.80))
+            merge_item(items, JunkItem("Купка дротів",10, 1.20))
             print("Демо-додано (дублікати зведені).")
             show(items)
 
@@ -156,6 +200,7 @@ def menu():
             break
         else:
             print("Невірний вибір.\n")
+
 
 if __name__ == "__main__":
     menu()
