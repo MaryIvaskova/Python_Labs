@@ -1,50 +1,27 @@
-import os
+import os, csv
 
-# --- налаштування формату ---
-SEP = ';'             
-
+# === Налаштування ===
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_FILE = os.path.join(BASE_DIR, "мусорка.csv")
-
-def to_dec_comma(x: float) -> str:
-    return f"{float(x):.2f}".replace(".", ",")
-
-def from_dec_comma(s: str) -> float:
-    return float((s or "").replace(" ", "").replace(",", "."))
+DEFAULT_FILE = os.path.join(BASE_DIR, "мусорка.csv")   # той самий файл, але тепер валідний CSV
+SEP = ','     # єдиний сепаратор полів у файлі
+PREC = 2      # кількість знаків після крапки на виводі
 
 def norm_name(name: str) -> str:
     return " ".join(name.strip().lower().split())
 
-def price_str(v: float) -> str:
-    return f"{float(v):.2f}"
+def f2(x: float) -> str:
+    return f"{float(x):.{PREC}f}"
 
-# --- модель ---
+# === Модель ===
 class JunkItem:
     def __init__(self, name, quantity, value):
         self.name = name.strip()
         self.quantity = int(quantity)
         self.value = float(value)
 
-    def line(self) -> str:
-        # Назва;Кількість;Ціна(з комою)
-        return SEP.join([self.name, str(self.quantity), to_dec_comma(self.value)])
-
-    @staticmethod
-    def from_line(line: str):
-        parts = [p.strip() for p in line.strip().split(SEP)]
-        if len(parts) != 3:
-            return None
-        name, q, v = parts
-        try:
-            q = int(q)
-            v = from_dec_comma(v)
-            return JunkItem(name, q, v)
-        except:
-            return None
-
-# --- ключ та злиття дубльованих предметів ---
+# ключ для злиття дублікатів: (нормалізована назва, ціна у 2 знаки)
 def item_key(it: JunkItem) -> tuple[str, str]:
-    return (norm_name(it.name), price_str(it.value))
+    return (norm_name(it.name), f2(it.value))
 
 def merge_item(items: list[JunkItem], new_item: JunkItem) -> None:
     k = item_key(new_item)
@@ -60,55 +37,67 @@ def merge_all(items: list[JunkItem]) -> list[JunkItem]:
         merge_item(acc, it)
     return acc
 
-# --- читання та запис ---
+# === Запис / Читання CSV (кома-сепаратор, крапка-десяткова) ===
 def save_items(items: list[JunkItem], filename: str = DEFAULT_FILE) -> None:
     items = merge_all(items)
     with open(filename, "w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f, delimiter=SEP, quoting=csv.QUOTE_MINIMAL)
+        # (необов’язково) шапка
+        w.writerow(["name", "quantity", "value"])
         for it in items:
-            f.write(it.line() + "\n")
-    print(f"Файл створено або оновлено: {filename}")
+            w.writerow([it.name, it.quantity, f2(it.value)])
+    print(f"Файл створено/оновлено: {filename}")
 
 def load_items(filename: str = DEFAULT_FILE) -> list[JunkItem]:
     items: list[JunkItem] = []
     bad = 0
     try:
-        with open(filename, "r", encoding="utf-8") as f:
-            for i, line in enumerate(f, 1):
-                it = JunkItem.from_line(line)
-                if it:
+        with open(filename, "r", encoding="utf-8", newline="") as f:
+            r = csv.reader(f, delimiter=SEP)
+            header_skipped = False
+            for row in r:
+                # пропускаємо шапку, якщо є
+                if not header_skipped and row and row[0].strip().lower() == "name":
+                    header_skipped = True
+                    continue
+                if len(row) != 3:
+                    bad += 1; continue
+                name, q, v = row
+                try:
+                    it = JunkItem(name, int(q), float(str(v).replace(" ", "")))
                     merge_item(items, it)
-                else:
+                except:
                     bad += 1
-                    print(f"Рядок {i} пропущено (зіпсовані дані)")
-        print(f"Прочитано {len(items)} валідних записів, помилкових: {bad}")
+        if bad:
+            print(f"Імпорт: помилкових рядків пропущено: {bad}")
+        print(f"Прочитано валідних записів: {len(items)}")
     except FileNotFoundError:
-        print(f"Файл '{filename}' не знайдено — буде створено після збереження.")
+        print(f"Файл '{filename}' не знайдено — буде створено при збереженні.")
     return items
 
-# --- вивід таблиці ---
+# === Вивід таблиці в консоль ===
 def show_items(items: list[JunkItem]) -> None:
     if not items:
-        print("(порожньо)\n")
-        return
+        print("(порожньо)\n"); return
     print("\nНазва                 | К-сть |  Ціна  |  Сума ")
     print("------------------------------------------------")
     total = 0.0
     for it in items:
         s = it.quantity * it.value
         total += s
-        print(f"{it.name:<21} | {it.quantity:>5} | {to_dec_comma(it.value):>6} | {to_dec_comma(s):>6}")
+        print(f"{it.name:<21} | {it.quantity:>5} | {f2(it.value):>6} | {f2(s):>6}")
     print("------------------------------------------------")
-    print(f"Разом: {to_dec_comma(total)}\n")
+    print(f"Разом: {f2(total)}\n")
 
-# --- меню ---
+# === Меню ===
 def menu():
     items: list[JunkItem] = []
     while True:
         print("Меню:")
         print("1. Додати предмет")
         print("2. Показати предмети")
-        print("3. Зберегти у файл")
-        print("4. Відкрити з файлу (замінює поточний список)")
+        print("3. Зберегти у файл (CSV , .)")
+        print("4. Відкрити з файлу (CSV , .)")
         print("5. Демо (3 предмети, сумується)")
         print("6. Вийти")
         choice = input("Ваш вибір: ").strip()
@@ -116,11 +105,11 @@ def menu():
         if choice == "1":
             name = input("Назва: ").strip()
             q = input("Кількість (int): ").strip()
-            v = input("Ціна (кома або крапка): ").strip()
+            v = input("Ціна (крапка як десяткова, напр. 2.5): ").strip()
             try:
-                it = JunkItem(name, int(q), from_dec_comma(v))
+                it = JunkItem(name, int(q), float(v))
                 merge_item(items, it)
-                print("Додано або оновлено.\n")
+                print("Додано/оновлено.\n")
             except:
                 print("Помилка вводу.\n")
 
@@ -135,15 +124,14 @@ def menu():
             show_items(items)
 
         elif choice == "5":
-            merge_item(items, JunkItem("Бляшанка", 5, 2.50))
+            merge_item(items, JunkItem("Бляшанка",   5, 2.50))
             merge_item(items, JunkItem("Стара плата", 3, 7.80))
-            merge_item(items, JunkItem("Купка дротів", 10, 1.20))
+            merge_item(items, JunkItem("Купка дротів",10, 1.20))
             print("Демо-набір додано (суми оновлено)")
             show_items(items)
 
         elif choice == "6":
-            print("Готово.")
-            break
+            print("Готово."); break
         else:
             print("Невірний вибір.\n")
 
