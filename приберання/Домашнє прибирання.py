@@ -1,5 +1,7 @@
 import os
-# формат рядка у файлі: Назва|Кількість|Ціна_з_комою  (напр. Бляшанка|5|2,50)
+
+# --- налаштування формату ---
+SEP = ';'             
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_FILE = os.path.join(BASE_DIR, "мусорка.csv")
@@ -16,19 +18,20 @@ def norm_name(name: str) -> str:
 def price_str(v: float) -> str:
     return f"{float(v):.2f}"
 
-#  модель 
+# --- модель ---
 class JunkItem:
     def __init__(self, name, quantity, value):
         self.name = name.strip()
         self.quantity = int(quantity)
         self.value = float(value)
 
-    def line(self):
-        return f"{self.name}|{self.quantity}|{to_dec_comma(self.value)}"
+    def line(self) -> str:
+        # Назва;Кількість;Ціна(з комою)
+        return SEP.join([self.name, str(self.quantity), to_dec_comma(self.value)])
 
     @staticmethod
-    def from_line(line):
-        parts = line.strip().split("|")
+    def from_line(line: str):
+        parts = [p.strip() for p in line.strip().split(SEP)]
         if len(parts) != 3:
             return None
         name, q, v = parts
@@ -39,12 +42,11 @@ class JunkItem:
         except:
             return None
 
-#  ключ 
+# --- ключ та злиття дубльованих предметів ---
 def item_key(it: JunkItem) -> tuple[str, str]:
     return (norm_name(it.name), price_str(it.value))
 
-def merge_item(items, new_item):
-    """Об'єднати, якщо (нормалізована назва, ціна у 2 знаки) збігаються; інакше додати."""
+def merge_item(items: list[JunkItem], new_item: JunkItem) -> None:
     k = item_key(new_item)
     for it in items:
         if item_key(it) == k:
@@ -52,22 +54,22 @@ def merge_item(items, new_item):
             return
     items.append(new_item)
 
-def merge_all(items):
-    acc = []
+def merge_all(items: list[JunkItem]) -> list[JunkItem]:
+    acc: list[JunkItem] = []
     for it in items:
         merge_item(acc, it)
     return acc
 
-#  читання та запис
-def save_items(items, filename=DEFAULT_FILE):
+# --- читання та запис ---
+def save_items(items: list[JunkItem], filename: str = DEFAULT_FILE) -> None:
     items = merge_all(items)
-    with open(filename, "w", encoding="utf-8") as f:
+    with open(filename, "w", encoding="utf-8", newline="") as f:
         for it in items:
             f.write(it.line() + "\n")
     print(f"Файл створено або оновлено: {filename}")
 
-def load_items(filename=DEFAULT_FILE):
-    items = []
+def load_items(filename: str = DEFAULT_FILE) -> list[JunkItem]:
+    items: list[JunkItem] = []
     bad = 0
     try:
         with open(filename, "r", encoding="utf-8") as f:
@@ -83,8 +85,8 @@ def load_items(filename=DEFAULT_FILE):
         print(f"Файл '{filename}' не знайдено — буде створено після збереження.")
     return items
 
-#  формат таблиці 
-def show_items(items):
+# --- вивід таблиці ---
+def show_items(items: list[JunkItem]) -> None:
     if not items:
         print("(порожньо)\n")
         return
@@ -98,8 +100,9 @@ def show_items(items):
     print("------------------------------------------------")
     print(f"Разом: {to_dec_comma(total)}\n")
 
+# --- меню ---
 def menu():
-    items = []
+    items: list[JunkItem] = []
     while True:
         print("Меню:")
         print("1. Додати предмет")
@@ -141,7 +144,6 @@ def menu():
         elif choice == "6":
             print("Готово.")
             break
-
         else:
             print("Невірний вибір.\n")
 
