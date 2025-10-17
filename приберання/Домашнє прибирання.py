@@ -1,9 +1,16 @@
+# мусорка.py — «Домашнє прибирання»
+# ✓ без зовнішніх бібліотек
+# ✓ дублікати (назва+ціна) сумуються
+# ✓ файл(и) створюються поруч із цим скриптом
+# ✓ зберігаємо ДВА файли:
+#    1) мусорка_умова.csv — | між полями, десяткова КОМА (строго за вимогою)
+#    2) мусорка.csv       — , між полями, десяткова КРАПКА (портал/прев’ю GitHub)
+
 import os
 
 # --------- конфіг ---------
-FORMAT_MODE = "portal"  # "task" або "portal"
-SEP_TASK, DEC_TASK = "|", ","   # умова
-SEP_PORT, DEC_PORT = ";", "."   # для порталу
+SEP_TASK, DEC_TASK = "|", ","   # формат «за умовою»
+SEP_PORT, DEC_PORT = ",", "."   # формат «для порталу / GitHub Preview»
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_FILE = os.path.join(BASE_DIR, "мусорка.csv")
@@ -16,15 +23,15 @@ def detect_format(line: str):
         return SEP_TASK, DEC_TASK
     if SEP_PORT in line:
         return SEP_PORT, DEC_PORT
-    return SEP_TASK, DEC_TASK  # дефолт — умова задачі
+    return SEP_TASK, DEC_TASK
 
 def to_dec(x: float, dec: str) -> str:
-    """Форматує 2 знаки і ставить потрібний десятковий роздільник."""
+    """Формат 2 знаки з потрібним десятковим роздільником."""
     s = f"{float(x):.2f}"
     return s.replace(".", dec)
 
 def from_dec(s: str, dec: str) -> float:
-    """Читає число з потрібним десятковим роздільником."""
+    """Парсер числа з потрібним десятковим роздільником."""
     s = (s or "").replace(" ", "")
     if dec == ",":
         s = s.replace(",", ".")
@@ -41,13 +48,13 @@ def price_key(v: float) -> str:
 class JunkItem:
     def __init__(self, name: str, quantity: int, value: float):
         # захист від вбудованих роздільників у назві
-        safe = (name or "").strip().replace("|", "/").replace(";", "/")
+        safe = (name or "").strip().replace("|", "/").replace(";", "/").replace(",", "/")
         self.name = safe
         self.quantity = int(quantity)
         self.value = float(value)
 
     def to_line(self, sep="|", dec=",") -> str:
-        # Назва|К-сть|Ціна(десяткова: кома/крапка)
+        # Назва|К-сть|Ціна (десяткова: кома/крапка)
         return sep.join([self.name, str(self.quantity), to_dec(self.value, dec)])
 
     @staticmethod
@@ -86,32 +93,36 @@ def merge_all(items: list[JunkItem]) -> list[JunkItem]:
 
 
 # --------- I/O ---------
-def save_items(items: list[JunkItem], filename: str = DEFAULT_FILE) -> None:
-    """Запис у один файл 'мусорка.csv' у вибраному форматі."""
+def save_items(items, _ignored_filename=DEFAULT_FILE):
+    """Пише ДВА файли: (1) за вимогою, (2) для порталу."""
     items = merge_all(items)
-    if FORMAT_MODE == "portal":
-        sep, dec = SEP_PORT, DEC_PORT
-    else:
-        sep, dec = SEP_TASK, DEC_TASK
 
-    with open(filename, "w", encoding="utf-8", newline="") as f:
-        # для порталу можна дати шапку — портали люблять
-        if sep == SEP_PORT:
-            f.write(f"name{sep}quantity{sep}value\n")
+    # 1) Файл за УМОВОЮ (| + кома)
+    task_file = os.path.join(BASE_DIR, "мусорка_умова.csv")
+    with open(task_file, "w", encoding="utf-8", newline="") as f:
         for it in items:
-            f.write(it.to_line(sep=sep, dec=dec) + "\n")
+            f.write(it.to_line(sep=SEP_TASK, dec=DEC_TASK) + "\n")
 
-    print(f"Файл створено/оновлено: {filename}  (формат: {FORMAT_MODE})")
+    # 2) Файл ДЛЯ ПОРТАЛУ (коми між полями + крапка в дробах)
+    portal_file = os.path.join(BASE_DIR, "мусорка.csv")
+    with open(portal_file, "w", encoding="utf-8", newline="") as f:
+        f.write("name,quantity,value\n")  # шапка (можна прибрати)
+        for it in items:
+            f.write(it.to_line(sep=SEP_PORT, dec=DEC_PORT) + "\n")
+
+    print("Збережено:")
+    print(f" - за умовою:   {task_file}   (Назва|К-сть|Ціна_з_комою)")
+    print(f" - для порталу: {portal_file} (name,quantity,value з крапкою)")
 
 def load_items(filename: str = DEFAULT_FILE) -> list[JunkItem]:
-    """Читає як 'task', так і 'portal' формат, шапку порталу ігнорує."""
+    """Читає як 'task', так і 'portal' формат. Шапку порталу ігнорує."""
     items: list[JunkItem] = []
     bad = 0
     try:
         with open(filename, "r", encoding="utf-8") as f:
             first = True
             for i, line in enumerate(f, 1):
-                # пропустити шапку у 'portal'
+                # пропустити шапку у портальному файлі
                 if first and (SEP_PORT in line) and line.lower().startswith(f"name{SEP_PORT}"):
                     first = False
                     continue
@@ -142,7 +153,6 @@ def show(items: list[JunkItem]) -> None:
     for it in items:
         s = it.quantity * it.value
         total += s
-        # красивий вивід: десятковий роздільник під формат меню («кома» зручно візуально)
         price_view = to_dec(it.value, ",")
         sum_view = to_dec(s, ",")
         print(f"{it.name:<21} | {it.quantity:>5} | {price_view:>6} | {sum_view:>6}")
@@ -157,8 +167,8 @@ def menu():
         print("Меню:")
         print("1. Додати предмет")
         print("2. Показати предмети")
-        print("3. Зберегти у файл (мусорка.csv)")
-        print("4. Відкрити з файлу (замінює список)")
+        print("3. Зберегти у файли (мусорка_умова.csv + мусорка.csv)")
+        print("4. Відкрити з файлу (мусорка.csv)")
         print("5. Демо (3 предмети, дублікати сумуються)")
         print("6. Вийти")
         ch = input("Ваш вибір: ").strip()
@@ -168,10 +178,9 @@ def menu():
             q = input("Кількість (int): ").strip()
             v = input("Ціна (крапка або кома): ").strip()
             try:
-                # приймаємо і кому, і крапку — перетворимо за портальним форматом
-                # (неважливо, усе збережеться згідно FORMAT_MODE)
-                dec = DEC_PORT if FORMAT_MODE == "portal" else DEC_TASK
-                val = from_dec(v, dec) if ("," in v or "." in v) else float(v)
+                # приймаємо і кому, і крапку
+                dec_guess = "," if "," in v and "." not in v else "."
+                val = from_dec(v, "," if dec_guess == "," else ".")
                 it = JunkItem(name, int(q), float(val))
                 merge_item(items, it)
                 print("Додано/оновлено.\n")
@@ -182,15 +191,15 @@ def menu():
             show(items)
 
         elif ch == "3":
-            save_items(items, DEFAULT_FILE)
+            save_items(items)
 
         elif ch == "4":
             items = load_items(DEFAULT_FILE)
             show(items)
 
         elif ch == "5":
-            merge_item(items, JunkItem("Бляшанка",    5, 2.50))
-            merge_item(items, JunkItem("Стара плата", 3, 7.80))
+            merge_item(items, JunkItem("Бляшанка",     5, 2.50))
+            merge_item(items, JunkItem("Стара плата",  3, 7.80))
             merge_item(items, JunkItem("Купка дротів",10, 1.20))
             print("Демо-додано (дублікати зведені).")
             show(items)
