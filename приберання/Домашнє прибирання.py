@@ -1,4 +1,3 @@
-
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -9,7 +8,6 @@ def to_dec_comma(x: float) -> str:
     return f"{float(x):.2f}".replace(".", ",")
 
 def from_dec_comma(s: str) -> float:
-    # приймаємо і кому, і крапку; зберігаємо завжди з комою
     s = (s or "").strip().replace(" ", "")
     return float(s.replace(",", "."))
 
@@ -29,11 +27,12 @@ class JunkItem:
         self.value = float(value)
 
     def line(self) -> str:
-        # Назва|К-сть|Ціна(з комою)
         return f"{self.name}|{self.quantity}|{to_dec_comma(self.value)}"
 
     @staticmethod
     def from_line(line: str):
+        if "|" not in line:
+            return None
         parts = [p.strip() for p in line.strip().split("|")]
         if len(parts) != 3:
             return None
@@ -46,7 +45,7 @@ class JunkItem:
             return None
 
 
-# ---------- мерж дублікатів (назва + ціна) ----------
+# ---------- об'єднання дублікатів ----------
 def item_key(it: JunkItem) -> tuple[str, str]:
     return (norm_name(it.name), price_key(it.value))
 
@@ -59,44 +58,52 @@ def merge_item(items: list[JunkItem], new_item: JunkItem) -> None:
     items.append(new_item)
 
 def merge_all(items: list[JunkItem]) -> list[JunkItem]:
-    acc: list[JunkItem] = []
+    acc = []
     for it in items:
         merge_item(acc, it)
     return acc
 
 
-# ---------- ЄДИНИЙ «сериалайзер» ----------
+# ---------- серіалізація ----------
 class JunkStorage:
     @staticmethod
     def serialize(items: list[JunkItem], filename: str = FILENAME) -> None:
+        """Зберігає у форматі з | і комами, але з шапкою для зручності."""
         items = merge_all(items)
         with open(filename, "w", encoding="utf-8", newline="") as f:
+            f.write("Назва|Кількість|Ціна\n")  # шапка
             for it in items:
                 f.write(it.line() + "\n")
-        print(f"Файл збережено: {filename}  (формат: Назва|К-сть|Ціна_з_комою)")
+        print(f" Файл збережено: {filename}")
 
     @staticmethod
     def parse(filename: str = FILENAME) -> list[JunkItem]:
-        items: list[JunkItem] = []
+        """Читає з файлу, ігноруючи шапку."""
+        items = []
         bad = 0
         try:
             with open(filename, "r", encoding="utf-8") as f:
+                first = True
                 for i, line in enumerate(f, 1):
+                    if first and "Назва" in line and "|" in line:
+                        first = False
+                        continue
+                    first = False
                     it = JunkItem.from_line(line)
                     if it:
                         merge_item(items, it)
                     else:
                         bad += 1
-                        print(f"Рядок {i} пропущено (зіпсовані дані)")
+                        print(f"⚠️ Рядок {i} пропущено (зіпсовані дані)")
             if bad:
                 print(f"Помилкових рядків: {bad}")
-            print(f"Прочитано валідних записів: {len(items)}")
+            print(f"📦 Прочитано валідних записів: {len(items)}")
         except FileNotFoundError:
             print(f"Файл '{filename}' не знайдено — буде створено при збереженні.")
         return items
 
 
-# ---------- вивід таблиці ----------
+# ---------- відображення ----------
 def show(items: list[JunkItem]) -> None:
     if not items:
         print("(порожньо)\n")
@@ -119,9 +126,9 @@ def menu():
         print("Меню:")
         print("1. Додати предмет")
         print("2. Показати предмети")
-        print("3. Зберегти у файл (мусорка.csv)")
-        print("4. Відкрити з файлу (замінює поточний список)")
-        print("5. Демо (3 предмети; дублікати сумуються при кожному натисканні)")
+        print("3. Зберегти у файл")
+        print("4. Відкрити з файлу")
+        print("5. Демо (3 предмети; дублікати сумуються)")
         print("6. Вийти")
         ch = input("Ваш вибір: ").strip()
 
@@ -132,9 +139,9 @@ def menu():
             try:
                 it = JunkItem(name, int(q), from_dec_comma(v))
                 merge_item(items, it)
-                print("Додано/оновлено.\n")
+                print("✅ Додано або оновлено.\n")
             except:
-                print("Помилка вводу.\n")
+                print("⚠️ Помилка вводу.\n")
 
         elif ch == "2":
             show(items)
@@ -147,15 +154,15 @@ def menu():
             show(items)
 
         elif ch == "5":
-            # Фікс демо: кожен виклик додає цей самий набір, але через merge кількість сумується
-            merge_item(items, JunkItem("Бляшанка",     5, 2.50))
-            merge_item(items, JunkItem("Стара плата",  3, 7.80))
-            merge_item(items, JunkItem("Купка дротів",10, 1.20))
-            print("Демо-набір додано (суми оновлено).")
+            # демо з фіксом — суми оновлюються без дублювання рядків
+            merge_item(items, JunkItem("Бляшанка", 5, 2.50))
+            merge_item(items, JunkItem("Стара плата", 3, 7.80))
+            merge_item(items, JunkItem("Купка дротів", 10, 1.20))
+            print("🧹 Демо-набір додано (суми оновлено).")
             show(items)
 
         elif ch == "6":
-            print("Готово.")
+            print(" Готово.")
             break
         else:
             print("Невірний вибір.\n")
